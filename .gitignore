@@ -1,0 +1,5 @@
+# 建置輸出（發布用，另有獨立儲存庫 ecology-graph-game）
+dist/
+node_modules/
+.vscode/
+*.log
