@@ -1,47 +1,37 @@
-# CLAUDE.md — 生態圖論 MVP 專案說明
+# 專案協作說明
 
-這是一個網頁生態模擬遊戲的 MVP。遊戲核心是數值模擬（圖論 + 能量流動），畫面只是讀取狀態並顯示。
-
-## 開始工作前必讀
-1. 先讀 `SPEC.md`。所有數值規則、Tick 順序、不變量都以它為準。
-2. 如果程式和 SPEC 衝突，**以 SPEC 為準**，並在回覆中指出衝突，不要自行改掉 SPEC。
+本專案是《失控的生態池》，一款以七種物種食物網為核心的瀏覽器模擬遊戲。開始改動前請閱讀 `README.md` 與 `SPEC.md`；原型備註 `PROTOTYPE_NOTES.md` 是歷史資料，其中舊介面與舊數值不可視為現況。
 
 ## 技術與指令
-- 原生 JavaScript（ES modules），畫面用 SVG，不使用框架。
-- 測試：`node --test tests/`
-- 直接開 `index.html` 或用 `npx serve .` 即可預覽。
-- **不要新增任何第三方套件。** 如果覺得必須加，先問我。
 
-## 目錄結構
-```
-src/engine/     純邏輯：state、tick、rng、params（不可 import DOM 或瀏覽器 API）
-src/ui/         SVG 畫面與按鈕（只讀 state，操作時呼叫 engine）
-tests/          node --test 測試
-SPEC.md         規格（唯一規則來源）
-CLAUDE.md       本檔
+- 原生 JavaScript ES modules、HTML Canvas 與 CSS；不使用第三方套件。
+- 以本機伺服器預覽：`python3 -m http.server 8000`，再開啟 `http://localhost:8000`。
+- 執行測試：`npm test`。
+- 建立發布版本：`npm run build`，輸出到 `dist/`。
+
+## 目錄
+
+```text
+src/engine/      模擬與遊戲規則；不得依賴 DOM 或瀏覽器 API
+src/ui/          Canvas、圖表、介面、種子碼與局面紀錄
+src/ui/assets/   場景圖示
+tests/           Node 內建測試
+tools/build.mjs  發布建置工具
 ```
 
 ## 工作原則
-- **引擎與畫面分開。** 模擬邏輯只能寫在 `src/engine/`。
-- **數字只放在 `src/engine/params.js`。** 邏輯裡不可寫死魔術數字。
-- **隨機數只能用 `src/engine/rng.js`。** 禁止使用 `Math.random()`。
-- **一次只改一件事。** 每次改動後跑測試，全部通過才算完成。
-- **不變量要守住。** 每次改動 tick 邏輯後，確認 SPEC 第 5 節的不變量測試仍然通過。
-- **改數值前先確認。** 若要修改 SPEC 的規則或參數，先說明理由與影響，等我同意再改。
-- **不做 SPEC 第 0 節「MVP 不做」的功能**，除非我明確要求。
+
+- 模擬與遊戲規則放在 `src/engine/`，畫面與操作放在 `src/ui/`。
+- 預設生態與遊戲數值集中在 `src/engine/params.js`；避免在模擬邏輯中複製數值常數。
+- 所有模擬亂數使用 `src/engine/rng.js`，不得使用 `Math.random()`。
+- 保持引擎函式可重現；除非明確標示為會修改輸入，否則回傳新狀態。
+- 改變模擬規則時，同步更新 `SPEC.md` 與相關測試；只改歷史記錄時更新 `PROTOTYPE_NOTES.md`。
+- 不新增第三方套件，除非使用者明確同意。
+- 改動完成後執行 `npm test`，並回報改了哪些檔案、測試結果與尚未確認的事項。
+- 不要刪除或弱化測試來讓測試通過；不要自行執行 `git push`。
 
 ## 程式風格
-- 變數與函式名稱用英文（camelCase），註解可以用中文。
-- 函式盡量是純函式：輸入 state 與 params，回傳新 state；避免在函式裡修改傳入的物件（或明確說明會修改）。
-- 每個檔案開頭用一兩行註解說明用途。
 
-## 完成一個任務時
-1. 跑 `node --test tests/`，確認全部通過。
-2. 列出你改了哪些檔案、為什麼改。
-3. 如果有任何不確定的地方，列在最後，不要默默決定。
-4. 不要自行執行 `git push`，等我確認。
-
-## 不要做的事
-- 不要刪除或弱化測試來讓測試通過。
-- 不要把 API 金鑰、帳號或密碼寫進任何檔案。
-- 不要修改 `SPEC.md` 的數值來配合程式的錯誤。
+- 變數與函式名稱使用英文 camelCase，註解可使用繁體中文。
+- 保持純邏輯與瀏覽器 API 分離，避免在引擎中讀取 DOM、時間或非 seeded 隨機來源。
+- 重要的數值或規則取捨請在程式註解或原型備註中說明，並更新面向玩家或開發者的文件。

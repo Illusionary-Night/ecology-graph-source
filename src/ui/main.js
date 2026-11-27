@@ -1,37 +1,16 @@
-// UI 主程式：建立 SVG、綁定按鈕、以計時器驅動 engine。只讀 state，操作時呼叫 engine。
+// UI 主程式：建立動態生態場景、綁定按鈕、以計時器驅動 engine。只讀 state，操作時呼叫 engine。
 import { DEFAULT_PARAMS, createInitialState, spawn, setCount } from '../engine/state.js';
 import { tick } from '../engine/tick.js';
-import { foodShare, hungerRatio, getSpecies, selfSufficiency, edgeEnergyFlows, seasonFactor } from '../engine/derived.js';
-import { hasSeedBank, isStaged, juvenileCount } from '../engine/ages.js';
-import { ageRingCells, ringGeometry, edgeVisual, pickLabelPoint } from './viz.js';
-import { MODIFIERS, modifierLabel, effectLines, startGame, chooseOffer, advanceGame, previewOffers } from '../engine/game.js';
+import { getSpecies, selfSufficiency, seasonFactor } from '../engine/derived.js';
+import { MODIFIERS, modifierLabel, effectLines, startGame, chooseOffer, advanceGame } from '../engine/game.js';
 import { buildRecord, roundText } from './record.js';
 import { codeFromSeed, seedFromCode, randomCode } from './seedcode.js';
 import { BUILD } from '../version.js';
 import { createHistory, recordSample, addMarker, setReferenceEnd, visibleWindow, scrollEnd } from './history.js';
 import { drawChart, SPECIES_COLORS } from './chart.js';
+import { createEcosystemView, ICON_IMAGES } from './ecosystem.js';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 const params = DEFAULT_PARAMS;
-
-// 節點位置（畫面佈局，非模擬數值）
-// 依營養層級分三排：下排生產者、中排草食者、上排肉食者
-const NODE_POS = {
-  grass: { x: 170, y: 456 }, bush: { x: 550, y: 456 },
-  mouse: { x: 90, y: 266 }, rabbit: { x: 290, y: 266 }, deer: { x: 520, y: 266 },
-  fox: { x: 190, y: 76 }, wolf: { x: 470, y: 76 },
-};
-const NODE_RADIUS = 32;
-const RING_RADIUS = NODE_RADIUS + 9; // 年齡環（小圓圈）的半徑
-const RING_OUT = RING_RADIUS + 4; // 節點含年齡環的外緣，標籤、能量條、箭頭端點都以此為準
-const MAX_RING_DOTS = 36; // 年齡格太多時，相鄰格合併，最多顯示這麼多個小圓圈
-const COLORS = { producer: '#2f8f4e', consumer: '#c0392b' };
-const JUVENILE_COLOR = '#2f80ed'; // 年齡環：幼年格
-const ADULT_COLOR = '#f59e0b'; // 年齡環：成年格
-// 每個節點「佔用」的矩形（含年齡環、名稱、能量條與兩行小字），百分比標籤會自動避開
-const NODE_RECTS = Object.values(NODE_POS).map(({ x, y }) => ({ x0: x - 60, x1: x + 60, y0: y - RING_OUT - 18, y1: y + RING_OUT + 4 + 8 + 30 }));
-const BAR_WIDTH = 70;
-const BAR_HEIGHT = 8;
 
 // 種子碼（6 位英數字，見 seedcode.js）：網址 ?code=XXXXXX 指定；舊的 ?seed=數字 仍可用（轉成對應種子碼）；都沒給就每次載入隨機產生一組。
 // 隨機來源用 crypto.getRandomValues（禁止 Math.random）；32 整除 2^32，取餘數沒有偏差
@@ -44,7 +23,7 @@ let seedCode = seedFromCode(urlParams.get('code')) !== null
   : seedParam !== null && Number.isFinite(Number(seedParam)) ? codeFromSeed(Number(seedParam)) : newRandomCode();
 let GAME_SEED = seedFromCode(seedCode);
 const PICKS = urlParams.get('picks') ? urlParams.get('picks').split(',').map(Number) : null;
-let pickLog = []; // 這局每回合玩家選了第幾個選項、當時提示是否開啟：[{ round, index, hint }]
+let pickLog = []; // 這局每回合玩家選擇的方案：[{ round, index }]
 
 let state = createInitialState(params, GAME_SEED);
 
@@ -65,18 +44,47 @@ let chartDrawnAt = 0;
 let chartDirty = true;
 const CHART_SPANS = [1000, 2500, 5000, 10000, 20000]; // 可切換的時間尺度（Tick）
 const CHART_WHEEL_FRACTION = 0.1; // 滾輪每一格移動視窗長度的比例
-let paused = false;
+let paused = true; // 開啟頁面先停住，等玩家從啟動選單選擇玩法
 let speed = 1; // 可用網址參數指定初始倍速，例如 ?speed=100
 let speedLocked = false; // 玩家是否手動指定過速度：指定過就不再被遊戲自動改掉
 let timer = null;
 let endlessMode = false; // 無盡模式（網址參數 ?mode=endless；沒有回合上限、牌可重複，撐到有物種滅絕為止）
 let gameMode = false; // 三選一遊戲模式（網址參數 ?mode=game 可直接開始）
-let previewCache = null; // { round, data }：本回合各選項的預覽，避免重複計算
-let previewError = null; // 預覽計算失敗時的錯誤訊息（顯示在選牌畫面）
-let hintOn = new URLSearchParams(location.search).get('hint') === '1'; // 提示：是否顯示預測結果。預設隱藏（網址 ?hint=1 一開始就顯示）
+let tutorialActive = false;
+let tutorialIndex = 0;
+let tutorialTaskDone = false;
 let panelKey = ''; // 目前遊戲面板對應的 階段+回合，變了才重建
 
 const $ = (id) => document.getElementById(id);
+const runControls = $('runControls');
+const chartPanelElement = $('chartPanel');
+const chartHome = chartPanelElement.parentNode;
+const chartHomeAnchor = document.createComment('chartPanel home');
+chartHome.insertBefore(chartHomeAnchor, chartPanelElement);
+let chartWasOpenBeforeOverlay = false;
+let overlayScrollY = 0;
+
+function lockPageScroll() {
+  overlayScrollY = window.scrollY;
+  document.body.classList.add('selection-overlay-open');
+  document.body.style.top = `-${overlayScrollY}px`;
+}
+
+function unlockPageScroll() {
+  if (!document.body.classList.contains('selection-overlay-open')) return;
+  document.body.classList.remove('selection-overlay-open');
+  document.body.style.top = '';
+  window.scrollTo(0, overlayScrollY);
+}
+
+function restoreChartPanel() {
+  if (chartPanelElement.parentNode !== chartHome) {
+    unlockPageScroll();
+    chartHome.insertBefore(chartPanelElement, chartHomeAnchor.nextSibling);
+    chartPanelElement.open = chartWasOpenBeforeOverlay;
+    updateChart(true);
+  }
+}
 
 // 大數字縮寫：1234 → 1.2k、1500000 → 1.50M
 function formatCount(n) {
@@ -84,70 +92,24 @@ function formatCount(n) {
   if (n < 1e6) return (n / 1000).toFixed(n < 1e4 ? 1 : 0) + 'k';
   return (n / 1e6).toFixed(2) + 'M';
 }
-const svg = $('graph');
-
-function el(name, attrs = {}, parent = svg) {
-  const e = document.createElementNS(SVG_NS, name);
-  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-  parent.appendChild(e);
-  return e;
-}
-
-// ---- 建立靜態 SVG 結構，之後只更新屬性 ----
-const defs = el('defs');
-const marker = el('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: 8, refY: 5, markerWidth: 4, markerHeight: 4, orient: 'auto-start-reverse' }, defs);
-el('path', { d: 'M0,0 L10,5 L0,10 z', fill: '#9aa0a6' }, marker);
-
-// 每條邊：底線（細灰線 + 箭頭，方向為 捕食者 → 獵物）、能量線（發光的流動虛線，亮點由獵物流向捕食者）、百分比標籤
-const edgeEls = state.edges.map((e) => ({
-  edge: e,
-  base: el('line', { stroke: '#9aa0a6', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'marker-end': 'url(#arrow)' }),
-  glow: el('line', { class: 'energy-line', 'stroke-width': 3.2, opacity: 0 }),
-  label: el('text', { class: 'bar-text' }),
-  glowKey: '', // 上次套用的發光與動畫設定，避免每次重繪都重設而讓動畫重新開始
-  durKey: '',
-}));
-
-const nodeEls = {};
-for (const s of state.species) {
-  const { x, y } = NODE_POS[s.id];
-  const g = el('g');
-  // 年齡環：只有有年齡結構的物種才有。圓圈從正上方順時針排列，年齡由小到大
-  let ring = null;
-  if (isStaged(s)) {
-    const cells = ageRingCells(s.ages, s.matureBin, MAX_RING_DOTS);
-    el('circle', { cx: x, cy: y, r: RING_RADIUS, fill: 'none', stroke: '#e6e6e6', 'stroke-width': 0.6 }, g);
-    ring = ringGeometry(cells.length, RING_RADIUS).map((d) => {
-      const dot = el('circle', { cx: x + d.x, cy: y + d.y, r: d.r, stroke: '#888', 'stroke-width': 0.5, 'fill-opacity': 0.1 }, g);
-      const title = el('title', {}, dot);
-      return { dot, title };
-    });
-  }
-  const body = el('circle', { cx: x, cy: y, r: NODE_RADIUS, fill: COLORS[s.kind] }, g);
-  el('text', { x, y, class: 'node-count' }, g);
-  el('text', { x, y: y - RING_OUT - 6, class: 'node-label' }, g).textContent = s.label;
-  const barY = y + RING_OUT + 4;
-  el('rect', { x: x - BAR_WIDTH / 2, y: barY, width: BAR_WIDTH, height: BAR_HEIGHT, fill: '#ddd', rx: 3 }, g);
-  const fill = el('rect', { x: x - BAR_WIDTH / 2, y: barY, width: 0, height: BAR_HEIGHT, rx: 3 }, g);
-  // 餓死警戒線標記
-  const lineX = x - BAR_WIDTH / 2 + BAR_WIDTH * params.starveLine;
-  el('line', { x1: lineX, x2: lineX, y1: barY - 2, y2: barY + BAR_HEIGHT + 2, stroke: '#333', 'stroke-width': 1 }, g);
-  const barText = el('text', { x, y: barY + BAR_HEIGHT + 14, class: 'bar-text' }, g);
-  const supplyText = el('text', { x, y: barY + BAR_HEIGHT + 26, class: 'bar-text' }, g);
-  nodeEls[s.id] = { g, body, countText: g.querySelector('.node-count'), fill, barText, supplyText, ring };
-}
-
-// 邊的端點：沿圓心連線，各縮進到節點（含年齡環）外緣（只畫在圓外）
-function edgeEndpoints(predatorId, preyId) {
-  const a = NODE_POS[predatorId];
-  const b = NODE_POS[preyId];
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len = Math.hypot(dx, dy);
-  const ux = dx / len;
-  const uy = dy / len;
-  const pad = RING_OUT + 2;
-  return { x1: a.x + ux * pad, y1: a.y + uy * pad, x2: b.x - ux * (pad + 6), y2: b.y - uy * (pad + 6) };
+const ecosystemView = createEcosystemView($('graph'));
+const summaryRows = new Map();
+for (const species of state.species) {
+  const row = document.createElement('div');
+  row.className = 'species-chip';
+  const icon = document.createElement('span');
+  icon.className = 'species-icon';
+  const image = document.createElement('img');
+  image.src = ICON_IMAGES[species.id];
+  image.alt = '';
+  icon.appendChild(image);
+  const label = document.createElement('strong');
+  label.textContent = species.label;
+  const count = document.createElement('small');
+  const details = document.createElement('small');
+  row.append(icon, label, count, details);
+  $('speciesSummary').appendChild(row);
+  summaryRows.set(species.id, { count, details });
 }
 
 // ---- 數量變化圖 ----
@@ -290,7 +252,7 @@ function render() {
   $('points').textContent = state.points;
   const st = $('status');
   st.className = state.status;
-  st.textContent = gameMode ? (endlessMode ? '無盡模式' : '三選一遊戲') : params.godMode ? '上帝模式' : { playing: '進行中', won: '勝利！', lost: '失敗' }[state.status];
+  st.textContent = gameMode ? (endlessMode ? '無盡模式' : '三選一遊戲') : tutorialActive ? '新手教學' : params.godMode ? '上帝模式' : { playing: '進行中', won: '勝利！', lost: '失敗' }[state.status];
 
   // 季節指示（進度條 + 百分比）；植物節點的明暗跟著季節變（旺季亮、淡季暗）
   const season = seasonFactor(state.tick, params);
@@ -302,74 +264,14 @@ function render() {
   $('seasonText').textContent = `${season > 1.05 ? '旺季' : season < 0.95 ? '淡季' : '平季'} ${Math.round(season * 100)}%`;
 
   for (const s of state.species) {
-    const n = nodeEls[s.id];
-    n.countText.textContent = formatCount(s.count);
-    if (s.kind === 'producer') n.body.setAttribute('fill', `hsl(138 52% ${Math.round(24 + 18 * seasonPos)}%)`);
-    n.g.setAttribute('opacity', s.count === 0 && !s.introduced ? 0.25 : 1);
-    const ratio = hungerRatio(s);
-    const shown = ratio === null ? 0 : Math.min(1, ratio);
-    n.fill.setAttribute('width', BAR_WIDTH * shown);
-    n.fill.setAttribute('fill', ratio !== null && ratio < params.starveLine ? '#e67e22' : '#3498db');
-    n.barText.textContent = ratio === null ? '—' : `能量 ${Math.round(ratio * 100)}%`;
-    // 自給率：預期收入 ÷ 代謝需求。< 100% 表示入不敷出（捕食者「獵物很多卻餓死」多半是這個）
-    const sup = selfSufficiency(s, state, params);
-    const juvText = isStaged(s) && s.count > 0 ? ` · 幼 ${Math.round((100 * juvenileCount(s)) / s.count)}%` : '';
-    const seedText = hasSeedBank(s) ? ` · 種子 ${formatCount(s.seeds)}` : '';
-    n.supplyText.textContent = sup === null ? (seedText ? seedText.slice(3) : '') : `自給 ${Math.round(sup * 100)}%${juvText}${seedText}`;
-    n.supplyText.setAttribute('fill', sup !== null && sup < 1 ? '#c0392b' : '#555');
-
-    // 年齡環：幼年藍、成年金；填色亮暗 = 該格人數相對於最多那格的比例
-    if (n.ring) {
-      const cells = ageRingCells(s.ages, s.matureBin, MAX_RING_DOTS);
-      cells.forEach((c, i) => {
-        const { dot, title } = n.ring[i];
-        dot.setAttribute('fill', c.juvenile ? JUVENILE_COLOR : ADULT_COLOR);
-        dot.setAttribute('fill-opacity', (0.06 + 0.94 * c.brightness ** 1.5).toFixed(3)); // 加 1.5 次方拉開亮暗對比
-        const from = c.from * params.ageBinTicks;
-        const to = (c.to + 1) * params.ageBinTicks;
-        title.textContent = `${c.juvenile ? '幼年' : '成年'} · 年齡約 ${from}～${to} Tick：${formatCount(c.sum)} 隻（占 ${(c.share * 100).toFixed(1)}%）`;
-      });
-    }
+    const shown = ecosystemView.desiredIcons(s.count, s.kind);
+    const row = summaryRows.get(s.id);
+    row.count.textContent = `${formatCount(s.count)} 隻 → ${shown.toLocaleString('zh-TW')} 個圖示`;
+    const energy = s.count > 0 ? `${Math.round(100 * s.energy / (s.unitEnergy * s.count))}%` : '—';
+    const supply = selfSufficiency(s, state, params);
+    row.details.textContent = `能量 ${energy} · 自給 ${supply === null ? '—' : `${Math.round(100 * supply)}%`}`;
   }
-
-  // 食物鏈箭頭：顏色／發光強度 = 占捕食者食物來源的比例；能量點移動速度 = 該邊能量流量（相對於流量最大的邊）
-  const energy = edgeEnergyFlows(state);
-  const maxEnergy = energy.reduce((m, x) => Math.max(m, x), 0);
-  edgeEls.forEach((item, i) => {
-    const { edge, base, glow, label } = item;
-    const p = edgeEndpoints(edge.predator, edge.prey);
-    const share = foodShare(edge, state); // 此邊占捕食者食物能量來源的比例
-    const vis = edgeVisual(share, maxEnergy > 0 ? energy[i] / maxEnergy : 0);
-    for (const line of [base, glow]) {
-      line.setAttribute('x1', p.x1);
-      line.setAttribute('y1', p.y1);
-      line.setAttribute('x2', p.x2);
-      line.setAttribute('y2', p.y2);
-    }
-    const lp = pickLabelPoint(p, NODE_RECTS); // 避開節點文字區
-    label.setAttribute('x', lp.x);
-    label.setAttribute('y', lp.y);
-    label.textContent = `${Math.round(share * 100)}%`;
-    const active = getSpecies(state, edge.predator).count > 0 && getSpecies(state, edge.prey).count > 0;
-    base.setAttribute('opacity', active ? 1 : 0.25);
-
-    if (vis.dashSeconds === null) {
-      glow.setAttribute('opacity', 0);
-    } else {
-      glow.setAttribute('opacity', vis.opacity.toFixed(2));
-      glow.setAttribute('stroke', vis.color);
-      const glowKey = `${vis.glowPx.toFixed(1)}|${vis.color}`;
-      if (glowKey !== item.glowKey) {
-        item.glowKey = glowKey;
-        glow.style.filter = `drop-shadow(0 0 ${vis.glowPx.toFixed(1)}px ${vis.color})`;
-      }
-      const durKey = vis.dashSeconds.toFixed(1);
-      if (durKey !== item.durKey) {
-        item.durKey = durKey;
-        glow.style.animationDuration = `${durKey}s`;
-      }
-    }
-  });
+  ecosystemView.update(state, season);
 
   for (const [id, input] of Object.entries(countInputs)) {
     if (document.activeElement !== input) input.value = getSpecies(state, id).count;
@@ -378,7 +280,7 @@ function render() {
     btn.disabled = state.status !== 'playing' || state.points < params.spawn[id].cost;
   }
   $('pauseBtn').textContent = paused ? '繼續' : '暫停';
-  if (gameMode) updateGameStatus();
+  updateGameProgress();
   updateChart();
   for (const [s, b] of Object.entries(speedBtns)) b.classList.toggle('active', Number(s) === speed);
 }
@@ -401,6 +303,7 @@ if (params.godMode) {
     input.addEventListener('change', () => {
       state = setCount(state, sp.id, Number(input.value), params);
       render();
+      completeTutorialTask(sp.id);
     });
     countInputs[sp.id] = input;
     row.appendChild(name);
@@ -432,6 +335,7 @@ function deltaButton(id, delta) {
   b.addEventListener('click', () => {
     state = setCount(state, id, getSpecies(state, id).count + delta, params);
     render();
+    completeTutorialTask(id);
   });
   return b;
 }
@@ -452,10 +356,15 @@ function h(tag, cls, text) {
 }
 
 function startGameMode(endless = false) {
+  clearTutorialFocus();
+  tutorialActive = false;
+  $('tutorialPanel').hidden = true;
   gameMode = true;
   endlessMode = endless;
+  $('gameContent').classList.add('game-mode-active');
   paused = false;
-  previewCache = null;
+  speed = 500;
+  speedLocked = false;
   pickLog = [];
   state = startGame(createInitialState(params, GAME_SEED), params, { endless });
   $('godPanel').hidden = true;
@@ -465,14 +374,21 @@ function startGameMode(endless = false) {
   resetHistory();
   render();
   renderGamePanel();
+  schedule();
 }
 
 function exitGameMode() {
+  clearTutorialFocus();
+  tutorialActive = false;
+  $('tutorialPanel').hidden = true;
   gameMode = false;
   paused = false;
+  $('gameContent').classList.remove('game-mode-active');
+  $('controls').appendChild(runControls);
   state = createInitialState(params, GAME_SEED);
   $('godPanel').hidden = false;
   $('gamePanel').hidden = true;
+  $('gameHeader').hidden = true;
   $('gameBtn').textContent = '三選一遊戲';
   $('endlessBtn').textContent = '無盡模式';
   endlessMode = false;
@@ -490,7 +406,7 @@ function appendRecordBlock(panel) {
   ta.hidden = true;
   ta.rows = 8;
   btn.addEventListener('click', async () => {
-    const text = buildRecord({ state, pickLog, seed: GAME_SEED, code: seedCode, build: BUILD, url: location.origin + location.pathname, strength, hintOn });
+    const text = buildRecord({ state, pickLog, seed: GAME_SEED, code: seedCode, build: BUILD, url: location.origin + location.pathname, strength, hintOn: false });
     ta.value = text;
     ta.hidden = false;
     try {
@@ -505,137 +421,118 @@ function appendRecordBlock(panel) {
   panel.appendChild(box);
 }
 
-// 預覽與結果中「這回合怎麼結束」的說明
-function endedText(o) {
-  if (o.ended === 'extinct') return `⚠ ${o.ticks} Tick 時有物種滅絕，遊戲立刻結束`;
-  if (o.ended === 'timeout') return `⏱ 等了 ${o.ticks} Tick（上限）仍未穩定`;
-  return `⏱ 約 ${o.ticks} Tick 後穩定`;
+// 依模式與階段更新全寬遊戲標頭
+function renderGameHeader(g) {
+  const header = $('gameHeader');
+  header.replaceChildren();
+  header.hidden = false;
+  const line = h('div', 'game-header-line');
+  const titleGroup = h('div', 'game-title-group');
+  titleGroup.appendChild(h('span', 'game-kicker', g.endless ? 'ENDLESS ECOSYSTEM' : 'ECOSYSTEM CHALLENGE'));
+  const phaseLabel = g.phase === 'finished' ? '挑戰結束' : g.warmup ? '觀察期' : roundText(g);
+  titleGroup.appendChild(h('div', 'game-head', `${g.endless ? '無盡模式' : '三選一模式'} · ${phaseLabel}`));
+  line.appendChild(titleGroup);
+  const actions = h('div', 'game-header-actions');
+  const seed = h('div', 'game-seed');
+  seed.append(h('span', 'game-seed-label', '種子碼'), h('strong', 'game-seed-value', seedCode));
+  actions.appendChild(seed);
+  appendRecordBlock(actions);
+  line.appendChild(actions);
+  header.appendChild(line);
+  const controlsLine = h('div', 'game-header-controls');
+  let roundCount;
+  if (g.endless) {
+    roundCount = h('span', 'game-round-count', `回合數　${g.history.length}`);
+  } else {
+    roundCount = h('div', 'game-round-count game-round-steps');
+    for (let round = 1; round <= g.totalRounds; round++) {
+      const step = h('span', 'game-round-index', String(round));
+      if (round <= g.history.length) step.classList.add('complete');
+      else if (round === Math.min(g.round, g.totalRounds)) step.classList.add('current');
+      roundCount.appendChild(step);
+    }
+  }
+  controlsLine.append(roundCount, runControls);
+  header.appendChild(controlsLine);
 }
 
-// 執行階段：只更新等待進度與穩定度文字，不重建整個面板
-function updateGameStatus() {
-  const g = state.game;
-  const el2 = $('gameRemain');
-  if (!el2 || g.phase !== 'running' || !g.track) return;
-  const cfg = params.game;
-  const elapsed = state.tick - g.track.startTick;
-  const last = g.track.last;
-  const stableText = last
-    ? `目前各物種平均值最大變動 ${last.maxChange === Infinity ? '∞' : Math.round(last.maxChange * 100) + '%'}（${labelOf(last.worstId)}），需 ≤ ${Math.round(cfg.stableTolerance * 100)}% 才算穩定`
-    : `累積資料中（至少要 ${Math.max(2 * cfg.stableWindowTicks, cfg.minRoundTicks ?? 0)} Tick 才能判定穩定）`;
-  const head = g.warmup ? '觀察期：先讓生態自己跑到第一次穩定，才會出現第 1 回合的選項' : `${roundText(g)}：等待生態穩定中`;
-  el2.textContent = `${head}，已等 ${elapsed} / 最多 ${cfg.maxWaitTicks} Tick。${stableText}。`;
-  const bar = $('gameProgress');
-  if (bar) bar.style.width = `${Math.min(100, (100 * elapsed) / cfg.maxWaitTicks)}%`;
-}
-
-// 依階段重建遊戲面板：選擇階段顯示三張卡片（含預覽），執行階段顯示進度，結束後顯示勝負
+// 選擇階段只顯示卡牌；觀察與模擬階段收起卡牌，結束時顯示結果。
 function renderGamePanel() {
   const g = state.game;
-  panelKey = `${g.phase}-${g.round}`;
+  panelKey = `${g.phase}-${g.round}-${g.warmup ? 'warmup' : 'active'}`;
   const panel = $('gamePanel');
+  restoreChartPanel();
   panel.replaceChildren();
-  panel.appendChild(h('div', 'game-head', g.warmup || (g.phase === 'finished' && g.history.length === 0) ? `${g.endless ? '無盡模式' : '三選一遊戲'} · 觀察期` : `${g.endless ? '無盡模式' : '三選一遊戲'} · ${roundText(g)}`));
+  panel.classList.toggle('card-selection-overlay', g.phase === 'choosing');
+  panel.classList.toggle('game-running-panel', g.phase === 'running');
+  renderGameHeader(g);
 
   if (g.phase === 'choosing') {
-    const cfg = params.game;
-    // 提示開啟時才需要預覽；預覽要把每個選項各自玩到穩定，約 1～2 秒：先顯示等待訊息，下一個 event loop 再算，畫面才不會卡住
-    if (hintOn && (!previewCache || previewCache.round !== g.round)) {
-      panel.appendChild(h('div', 'game-note', '計算預覽中…（把每個選項各自玩到穩定）'));
-      const round = g.round;
-      setTimeout(() => {
-        if (state.game.phase !== 'choosing' || state.game.round !== round || !hintOn) return;
-        try {
-          previewCache = { round, data: previewOffers(state, params) };
-          previewError = null;
-        } catch (err) {
-          // 預覽計算出錯（例如引擎不變量違反）：不能卡在「計算預覽中」，改為關掉提示並顯示錯誤，玩家仍可直接選牌
-          console.error(err);
-          previewError = String(err && err.message ? err.message : err);
-          hintOn = false;
-        }
-        renderGamePanel();
-      }, 30);
-      return;
-    }
-    const pv = hintOn ? previewCache.data : null;
-    if (previewError) panel.appendChild(h('div', 'warn-text', `⚠ 預覽計算失敗，已自動關閉提示（${previewError}）。請把這段文字連同「複製這局紀錄」回報。`));
-    panel.appendChild(h('div', 'game-note', `選一個選項，然後生態會一直跑到穩定（至少 ${Math.max(2 * cfg.stableWindowTicks, cfg.minRoundTicks ?? 0)}、最多 ${cfg.maxWaitTicks} Tick）；任何時候有物種滅絕就立刻失敗。` + (hintOn ? '下方預覽 = 選了之後這一回合實際會發生的結果（測試用）；各物種的數字是和「什麼都不改」相比，回合結束時的數量變化。' : '提示已隱藏，只能憑對生態的理解判斷。')));
+    panel.hidden = false;
+    lockPageScroll();
+    chartWasOpenBeforeOverlay = chartPanelElement.open;
+    chartPanelElement.open = true;
     const offers = h('div', 'offers');
     g.offers.forEach((offerId, i) => {
       const m = modOf(offerId);
-      const card = h('div', 'offer');
+      const card = h('div', `offer deal-in deal-card-${i + 1}`);
+      card.appendChild(h('span', 'offer-index', `方案 0${i + 1}`));
       card.appendChild(h('h3', '', modifierLabel(m, strength)));
       card.appendChild(h('div', 'desc', m.story));
-      card.appendChild(h('ul', 'effects', '')).append(...effectLines(m, strength).map((t) => h('li', '', t))); // 逐條列出效果
-      if (pv) {
-        const opt = pv.options[i];
-        card.appendChild(h('span', `badge ${opt.health.level}`, `預覽健康度 ${opt.health.score}`));
-        card.appendChild(h('div', opt.ended === 'settled' ? 'game-note' : 'warn-text', endedText(opt)));
-        if (opt.health.extinct.length) card.appendChild(h('div', 'warn-text', `⚠ 滅絕：${opt.health.extinct.map(labelOf).join('、')}`));
-        // 各物種的變化：和「什麼都不改」比，這回合結束時的數量差多少（排除掉本來就會有的自然起伏）
-        const chips = h('div', 'chips');
-        for (const sp of state.species) {
-          const baseFinal = pv.baseline.final[sp.id];
-          const gone = opt.final[sp.id] === 0 && baseFinal > 0;
-          const c = baseFinal > 0 ? opt.final[sp.id] / baseFinal - 1 : 0;
-          chips.appendChild(h('span', `chip ${gone ? 'gone' : c < -0.3 ? 'down' : c > 0.3 ? 'up' : ''}`, gone ? `${sp.label} 滅絕` : `${sp.label} ${pctText(c)}`));
-        }
-        card.appendChild(chips);
-      }
-      const btn = h('button', 'pick-btn', '選這個');
+      card.appendChild(h('ul', 'effects', '')).append(...effectLines(m, strength).map((t) => h('li', '', t)));
+      const btn = h('button', 'pick-btn', `選擇方案 0${i + 1}　→`);
       btn.addEventListener('click', () => {
-        pickLog.push({ round: g.round, index: i, hint: hintOn });
+        pickLog.push({ round: g.round, index: i, hint: false });
         addMarker(history, { type: 'pick', tick: state.tick, label: `第 ${g.round} 回合：${modifierLabel(m, strength)}` });
         renderChartCaption();
         state = chooseOffer(state, i, params);
-        if (!speedLocked) speed = 500; // 回合要等很久，沒手動指定過速度時，選定後自動切到最快；玩家調整過的速度不會被改掉
+        if (!speedLocked) speed = 500;
         render();
         renderGamePanel();
         schedule();
       });
       card.appendChild(btn);
-      // 測試輔助：網址加 ?autopick=1 自動選第一個、?picks=… 依序自動選（用來跑完整局驗證流程、重現測試者的那一局）
-      const want = PICKS ? PICKS[g.round - 1] : AUTOPICK ? 0 : undefined; // ?picks=1,0,2 依回合自動選；?autopick=1 一律選第 1 個
+      const want = PICKS ? PICKS[g.round - 1] : AUTOPICK ? 0 : undefined;
       if (want === i) setTimeout(() => btn.click(), 0);
       offers.appendChild(card);
     });
     panel.appendChild(offers);
-    if (pv) panel.appendChild(h('div', 'game-note', `對照：什麼都不改的話，${endedText(pv.baseline).replace(/^[⚠⏱] /, '')}，健康度 ${pv.baseline.health.score}${pv.baseline.health.extinct.length ? `，滅絕：${pv.baseline.health.extinct.map(labelOf).join('、')}` : ''}。`));
-    // 提示按鈕：切換顯示／隱藏預測結果（健康度、各物種數量變化、穩定時間、滅絕警告）
-    const hint = h('button', `hint-btn${hintOn ? ' active' : ''}`, hintOn ? '💡 提示：顯示預測中（點擊隱藏）' : '💡 提示：預測已隱藏（點擊顯示）');
-    hint.addEventListener('click', () => {
-      hintOn = !hintOn;
-      renderGamePanel();
-    });
-    panel.appendChild(hint);
+    panel.appendChild(chartPanelElement);
+    requestAnimationFrame(() => updateChart(true));
   } else if (g.phase === 'running') {
-    panel.appendChild(Object.assign(h('div', 'game-note', ''), { id: 'gameRemain' }));
-    if (g.warmup) panel.appendChild(h('div', 'game-note', '這段時間可以自由觀察各物種的數量、年齡環與能量流動，記住它們的樣子：之後每個選項都會改變這個生態。想看快一點，可以用下方的速度按鈕。'));
-    const track = h('div', 'progress');
-    track.appendChild(Object.assign(h('i', ''), { id: 'gameProgress' }));
-    panel.appendChild(track);
-    updateGameStatus();
+    panel.hidden = false;
+    panel.appendChild(h('div', 'game-pending', g.warmup ? '首輪卡牌準備中' : '生態模擬進行中'));
+    const shuffle = h('div', 'card-shuffle', '');
+    shuffle.setAttribute('aria-label', g.warmup ? '卡牌生成中' : '生態模擬中，卡牌洗牌動畫');
+    for (let i = 0; i < 3; i++) {
+      const card = h('div', `shuffle-card shuffle-card-${i + 1}`);
+      card.appendChild(h('span', 'shuffle-card-mark', '✦'));
+      shuffle.appendChild(card);
+    }
+    panel.appendChild(shuffle);
+    const progress = h('div', 'game-progress');
+    progress.appendChild(Object.assign(h('i', ''), { id: 'gameProgress' }));
+    panel.appendChild(progress);
   } else {
+    panel.hidden = false;
     const r = g.result;
     const rounds = g.history.length;
-    if (g.endless) {
-      panel.appendChild(h('div', 'result lost', `無盡模式結束：撐過 ${Math.max(0, rounds - 1)} 個回合，${rounds === 0 ? '觀察期' : `第 ${rounds} 回合`}中 ${r.extinct.map(labelOf).join('、')} 滅絕了。`));
-    } else panel.appendChild(h('div', `result ${r.won ? 'won' : 'lost'}`, r.won
+    if (g.endless) panel.appendChild(h('div', 'result lost', `無盡模式結束：撐過 ${Math.max(0, rounds - 1)} 個回合，${rounds === 0 ? '觀察期' : `第 ${rounds} 回合`}中 ${r.extinct.map(labelOf).join('、')} 滅絕了。`));
+    else panel.appendChild(h('div', `result ${r.won ? 'won' : 'lost'}`, r.won
       ? `勝利！${g.totalRounds} 個回合結束，沒有任何物種滅絕。${r.settled ? '' : '（最後一回合等到上限仍未達穩定）'}`
       : `失敗：${rounds === 0 ? '觀察期' : `第 ${rounds} 回合`}中 ${r.extinct.map(labelOf).join('、')} 滅絕了。`));
     const again = h('button', '', '再玩一次');
     again.addEventListener('click', () => startGameMode(endlessMode));
     panel.appendChild(again);
   }
-  if (g.warmupInfo) panel.appendChild(h('div', 'history', `觀察期：${g.warmupInfo.ticks} Tick ${g.warmupInfo.ended === 'settled' ? '後穩定' : g.warmupInfo.ended === 'timeout' ? '（等到上限仍未穩定）' : '時有物種滅絕'}`));
-  if (g.history.length) {
-    panel.appendChild(h('div', 'history', '已選擇：' + g.history.map((x) => {
-      const how = x.ended === null ? '進行中' : x.ended === 'settled' ? `${x.ticks} Tick 後穩定` : x.ended === 'timeout' ? `${x.ticks} Tick 仍未穩定` : `${x.ticks} Tick 時滅絕`;
-      return `第 ${x.round} 回合 ${modifierLabel(modOf(x.id), strength)}（${how}）`;
-    }).join('； ')));
-  }
-  appendRecordBlock(panel);
+}
+
+function updateGameProgress() {
+  if (!gameMode || state.game.phase !== 'running') return;
+  const fill = $('gameProgress');
+  if (!fill || !state.game.track) return;
+  const elapsed = state.tick - state.game.track.startTick;
+  fill.style.width = `${Math.min(100, 100 * elapsed / params.game.maxWaitTicks)}%`;
 }
 
 // 倍速：低倍速每步 1 Tick、間隔縮短；高倍速固定每 STEP_MS 毫秒一步，一步內連續跑多個 Tick，只在步末重繪一次
@@ -654,6 +551,7 @@ for (const sp of SPEEDS) {
 
 function schedule() {
   clearTimeout(timer);
+  if ($('gameContent').hidden) return;
   const perTickMs = params.tickMs / speed;
   timer = setTimeout(step, Math.max(perTickMs, STEP_MS));
 }
@@ -670,7 +568,7 @@ function step() {
       }
       syncGameMarkers();
       render();
-      if (`${state.game.phase}-${state.game.round}` !== panelKey) renderGamePanel();
+      if (`${state.game.phase}-${state.game.round}-${state.game.warmup ? 'warmup' : 'active'}` !== panelKey) renderGamePanel();
     } else {
       for (let i = 0; i < n; i++) {
         state = tick(state, params);
@@ -720,12 +618,185 @@ $('seedRandomBtn').addEventListener('click', () => applySeedCode(newRandomCode()
 $('gameBtn').addEventListener('click', () => (gameMode && !endlessMode ? exitGameMode() : startGameMode(false)));
 $('endlessBtn').addEventListener('click', () => (gameMode && endlessMode ? exitGameMode() : startGameMode(true)));
 
+// 開啟頁面的啟動選單：先選模式與種子，再開始推進模擬。
+const launchMenu = $('launchMenu');
+const launchSeedInput = $('launchSeedInput');
+const launchSeedNote = $('launchSeedNote');
+launchSeedInput.value = seedCode;
+$('launchSeedRandom').addEventListener('click', () => {
+  const code = newRandomCode();
+  launchSeedInput.value = code;
+  launchSeedInput.classList.remove('bad');
+  launchSeedNote.textContent = '已產生新種子碼。';
+});
+launchSeedInput.addEventListener('input', () => {
+  launchSeedInput.value = launchSeedInput.value.replace(/\s+/g, '').toUpperCase();
+  launchSeedInput.classList.remove('bad');
+  launchSeedNote.textContent = '相同種子碼會產生相同的隨機結果。';
+});
+const tutorialSteps = [
+  { title: '先看生態池', text: '圖片是動物和植物的即時場景。', target: ['#graph'], visual: 'scene' },
+  { title: '圖示代表族群', text: '植物每 1,000 隻、動物每 100 隻折算 1 個圖示，並向上取整。', target: ['#speciesSummary'], visual: 'scale' },
+  { title: '看季節與能量', text: '季節會改變植物收入；能量顯示目前儲備，自給率低於 100% 代表長期入不敷出。', target: ['#seasonWrap', '#speciesSummary'], scrollTo: '#topbar', visual: 'energy' },
+  { title: '親手改變族群', text: '按兔子列旁的「+1.0k」一次，再看場景和數量列的變化。', target: ['#godPanel'], visual: 'adjust', task: true },
+  { title: '控制觀察速度', text: '暫停可以看清某一刻；提高倍速可以更快觀察長期變化。', target: ['#pauseBtn', '#speedBtns'], scrollTo: '#controls', visual: 'speed' },
+  { title: '回顧族群變化', text: '展開數量圖，查看各物種隨時間的起伏。', target: ['#chartPanel'], visual: 'chart', openChart: true },
+  { title: '準備開始遊戲', text: '按主選單可重新選擇一般模擬、三選一或無盡模式。', target: ['#menuBtn'], scrollTo: '#controls', visual: 'modes' },
+];
+
+function clearTutorialFocus() {
+  document.querySelectorAll('.tutorial-focus').forEach((el) => el.classList.remove('tutorial-focus'));
+}
+
+function drawTutorialVisual(type) {
+  const box = $('tutorialVisual');
+  box.dataset.visual = type;
+  box.replaceChildren();
+  const img = (id) => {
+    const node = document.createElement('img');
+    node.src = ICON_IMAGES[id]; node.alt = '';
+    return node;
+  };
+  const label = (text) => {
+    const node = document.createElement('span');
+    node.className = 'visual-label'; node.textContent = text;
+    return node;
+  };
+  const arrow = () => {
+    const node = document.createElement('span');
+    node.className = 'visual-arrow'; node.textContent = '→';
+    return node;
+  };
+  if (type === 'scene') {
+    box.append(img('grass'), arrow(), img('rabbit'), arrow(), img('fox'));
+  } else if (type === 'scale') {
+    const plant = document.createElement('div'); plant.append(img('grass'), label('1,000 → 1'));
+    const animal = document.createElement('div'); animal.append(img('rabbit'), label('100 → 1'));
+    box.append(plant, animal);
+  } else if (type === 'energy') {
+    box.append(label('能量'));
+    const meter = document.createElement('span'); meter.className = 'visual-meter';
+    const fill = document.createElement('i'); meter.appendChild(fill); box.appendChild(meter);
+    box.append(label('自給 100%'));
+  } else if (type === 'adjust') {
+    box.append(img('rabbit'), label('兔群'), arrow(), label('+1.0k'));
+  } else if (type === 'speed') {
+    const pills = document.createElement('span'); pills.className = 'visual-pills';
+    ['暫停 Ⅱ', '1×　→　50×'].forEach((text) => { const item = document.createElement('i'); item.textContent = text; pills.appendChild(item); });
+    box.appendChild(pills);
+  } else if (type === 'chart') {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 90 44');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M3 36 C14 33 13 12 25 18 S39 38 49 24 S63 7 72 16 S81 29 87 5');
+    svg.appendChild(path); box.appendChild(svg);
+  } else {
+    ['教學', '模擬', '三選一', '無盡'].forEach((text) => box.appendChild(label(text)));
+  }
+}
+
+function renderTutorialStep() {
+  const step = tutorialSteps[tutorialIndex];
+  clearTutorialFocus();
+  $('tutorialStepLabel').textContent = `新手教學 · ${tutorialIndex + 1} / ${tutorialSteps.length}`;
+  $('tutorialTitle').textContent = step.title;
+  $('tutorialText').textContent = step.text;
+  $('tutorialHint').textContent = step.task
+    ? tutorialTaskDone ? '完成！看看兔子的數量與圖示變化。' : '試著操作一次；也可以直接按下一步。'
+    : '';
+  $('tutorialProgressFill').style.width = `${((tutorialIndex + 1) / tutorialSteps.length) * 100}%`;
+  $('tutorialPrev').disabled = tutorialIndex === 0;
+  $('tutorialNext').textContent = tutorialIndex === tutorialSteps.length - 1 ? '完成教學' : '下一步';
+  drawTutorialVisual(step.visual);
+  if (step.openChart) $('chartPanel').open = true;
+  const targets = document.querySelectorAll(step.target.join(','));
+  targets.forEach((el) => el.classList.add('tutorial-focus'));
+  const scrollTarget = document.querySelector(step.scrollTo ?? step.target[0]);
+  scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+}
+function finishTutorial() {
+  clearTutorialFocus();
+  tutorialActive = false;
+  $('tutorialPanel').hidden = true;
+  render();
+}
+function completeTutorialTask(speciesId) {
+  if (tutorialActive && tutorialIndex === 3 && speciesId === 'rabbit') {
+    tutorialTaskDone = true;
+    renderTutorialStep();
+  }
+}
+$('tutorialPrev').addEventListener('click', () => {
+  if (tutorialIndex > 0) { tutorialIndex--; renderTutorialStep(); }
+});
+$('tutorialNext').addEventListener('click', () => {
+  if (tutorialIndex === tutorialSteps.length - 1) finishTutorial();
+  else { tutorialIndex++; renderTutorialStep(); }
+});
+$('tutorialExit').addEventListener('click', finishTutorial);
+function launch(mode) {
+  const code = seedFromCode(launchSeedInput.value);
+  if (code === null) {
+    launchSeedInput.classList.add('bad');
+    launchSeedNote.textContent = '請輸入 6 位種子碼（不含 I、O、0、1），或按隨機產生。';
+    launchSeedInput.focus();
+    return;
+  }
+  const normalized = launchSeedInput.value.replace(/\s+/g, '').toUpperCase();
+  if (normalized !== seedCode) applySeedCode(normalized);
+  launchMenu.hidden = true;
+  $('gameContent').hidden = false;
+  launchMenu.querySelectorAll('[data-mode]').forEach((button) => {
+    button.classList.toggle('selected', button.dataset.mode === mode);
+  });
+  if (mode === 'game') startGameMode(false);
+  else if (mode === 'endless') startGameMode(true);
+  else {
+    gameMode = false;
+    endlessMode = false;
+    $('gameContent').classList.remove('game-mode-active');
+    $('controls').appendChild(runControls);
+    tutorialActive = mode === 'tutorial';
+    tutorialTaskDone = false;
+    paused = false;
+    state = createInitialState(params, GAME_SEED);
+    $('godPanel').hidden = false;
+    $('gamePanel').hidden = true;
+    $('gameHeader').hidden = true;
+    $('tutorialPanel').hidden = !tutorialActive;
+    $('gameBtn').textContent = '三選一遊戲';
+    $('endlessBtn').textContent = '無盡模式';
+    resetHistory();
+    render();
+    if (tutorialActive) { tutorialIndex = 0; renderTutorialStep(); }
+  }
+  schedule();
+}
+launchMenu.querySelectorAll('[data-mode]').forEach((button) => {
+  button.addEventListener('click', () => launch(button.dataset.mode));
+});
+$('menuBtn').addEventListener('click', () => {
+  clearTutorialFocus();
+  clearTimeout(timer);
+  timer = null;
+  paused = true;
+  gameMode = false;
+  endlessMode = false;
+  $('gameContent').classList.remove('game-mode-active');
+  $('controls').appendChild(runControls);
+  tutorialActive = false;
+  $('tutorialPanel').hidden = true;
+  $('gameHeader').hidden = true;
+  launchSeedInput.value = seedCode;
+  launchMenu.hidden = false;
+  $('gameContent').hidden = true;
+});
+
 setupChartControls();
 resetHistory();
 render();
-schedule();
 {
   const modeParam = new URLSearchParams(location.search).get('mode');
-  if (modeParam === 'game') startGameMode(false);
-  else if (modeParam === 'endless') startGameMode(true);
+  if (modeParam === 'game') { launch('game'); }
+  else if (modeParam === 'endless') { launch('endless'); }
 }

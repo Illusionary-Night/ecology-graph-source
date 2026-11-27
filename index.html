@@ -7,6 +7,48 @@
   <link rel="stylesheet" href="src/ui/style.css" />
 </head>
 <body>
+  <header id="brandline">
+    <div class="brand-mark" aria-hidden="true">E</div>
+    <div>
+      <div class="eyebrow">FIELD NOTES <span>/</span> 生態系統觀測</div>
+      <h1>失控的生態池</h1>
+      <p>每個選擇都會改變平衡。你能讓這片生態系存續多久？</p>
+    </div>
+  </header>
+
+  <section id="launchMenu" class="launch-menu" aria-labelledby="launchTitle">
+    <div class="launch-card">
+      <div class="launch-copy">
+        <span class="section-kicker">WELCOME TO THE ECOSYSTEM</span>
+        <h2 id="launchTitle">想怎麼開始觀察？</h2>
+        <p>選擇一種玩法，再輸入種子碼或抽一組新的生態起點。</p>
+      </div>
+      <div class="launch-modes" role="group" aria-label="選擇遊戲模式">
+        <button class="launch-mode" data-mode="tutorial" type="button">
+          <span class="mode-number">01</span><span><strong>新手教學</strong><small>用幾個簡短步驟認識生態圖與操作方式。</small></span><span class="mode-arrow">↗</span>
+        </button>
+        <button class="launch-mode" data-mode="simulation" type="button">
+          <span class="mode-number">02</span><span><strong>一般模擬</strong><small>自由調整物種數量，觀察食物網變化。</small></span><span class="mode-arrow">↗</span>
+        </button>
+        <button class="launch-mode featured" data-mode="game" type="button">
+          <span class="mode-number">03</span><span><strong>三選一模式</strong><small>每回合選擇一項自然事件，挑戰生態平衡。</small></span><span class="mode-arrow">↗</span>
+        </button>
+        <button class="launch-mode" data-mode="endless" type="button">
+          <span class="mode-number">04</span><span><strong>無盡模式</strong><small>持續接受事件考驗，看看生態能維持多久。</small></span><span class="mode-arrow">↗</span>
+        </button>
+      </div>
+      <div class="launch-seed">
+        <label for="launchSeedInput">生態種子碼</label>
+        <div class="seed-entry">
+          <input id="launchSeedInput" maxlength="6" size="7" spellcheck="false" autocomplete="off" aria-label="種子碼（6 位英數字）" />
+          <button id="launchSeedRandom" type="button">🎲 隨機產生</button>
+        </div>
+        <small id="launchSeedNote">相同種子碼會產生相同的隨機結果。</small>
+      </div>
+    </div>
+  </section>
+
+  <main id="gameContent" hidden>
   <header id="topbar">
     <span>Tick <b id="tickNum">0</b><span id="winWrap"> / <span id="winTicks"></span></span></span>
     <span id="pointsWrap">點數 <b id="points">0</b></span>
@@ -14,23 +56,34 @@
     <span id="status" class="playing">進行中</span>
   </header>
 
-  <details id="help">
-    <summary>怎麼玩？（第一次看請點開）</summary>
-    <p><b>這是什麼：</b>一個 7 種生物的食物網（草、灌木 → 鼠、兔、鹿 → 狐、狼）。畫面是生態的即時模擬，數字是真的在算能量與數量。</p>
-    <p><b>三選一遊戲：</b>按下方「三選一遊戲」。先有一段「觀察期」，讓生態跑到穩定，你可以先看清楚各物種的樣子；之後每個回合會出現三個選項，每個選項會改變某個生物的某項數值（例如代謝、繁殖成本、吃東西的效率）。選一個，生態就會跑到再次穩定才進入下一回合。<b>目標：6 個回合後沒有任何物種滅絕。</b>找出對生態傷害最小的選擇，選錯可能害某個物種滅絕，任何時候有物種滅絕就失敗。</p>
-    <p><b>提示按鈕：</b>預設隱藏預測。點「💡 提示」可以看每個選項的預測結果（會花 1～2 秒計算），想挑戰就保持隱藏。</p>
-    <p><b>速度：</b>回合很長，請用右下方的速度按鈕（建議 50x～500x）。<b>建議用電腦瀏覽器</b>，手機版面還沒做。</p>
-    <p><b>怎麼看圖：</b>圓圈中間是數量；外圍小圓圈是年齡格（藍＝幼年、金＝成年，越亮越多）；箭頭是捕食者 → 獵物，發光亮點往捕食者流動代表能量；百分比是這條線占該捕食者食物來源的比例；下方「自給」低於 100%（紅字）代表入不敷出。</p>
-    <p><b>回報：</b>玩到結束或覺得怪怪的，按「📋 複製這局紀錄」，把文字貼給我，我就能重現你那一局。</p>
-  </details>
+  <section id="tutorialPanel" hidden aria-live="polite">
+    <div class="tutorial-progress"><i id="tutorialProgressFill"></i></div>
+    <div class="tutorial-layout">
+      <div id="tutorialVisual" class="tutorial-visual" aria-hidden="true"></div>
+      <div class="tutorial-content">
+        <span id="tutorialStepLabel" class="section-kicker"></span>
+        <h2 id="tutorialTitle"></h2>
+        <p id="tutorialText"></p>
+        <p id="tutorialHint" class="tutorial-hint"></p>
+      </div>
+    </div>
+    <div class="tutorial-actions">
+      <button id="tutorialExit" type="button">跳過教學</button>
+      <span class="tutorial-nav">
+        <button id="tutorialPrev" type="button">上一步</button>
+        <button id="tutorialNext" class="tutorial-next" type="button">下一步</button>
+      </span>
+    </div>
+  </section>
 
-  <svg id="graph" viewBox="0 0 640 560" role="img" aria-label="生態圖"></svg>
-
-  <p id="legend">
-    箭頭方向：捕食者 → 獵物。發光的亮點由獵物流向捕食者，代表能量傳遞，流量越大跑得越快；
-    顏色與亮度、旁邊的百分比＝這條線占該捕食者食物來源的比例。
-    節點外圍的小圓圈是年齡格（從正上方順時針，年齡由小到大；藍＝幼年、金＝成年），越亮代表該格人數越多，滑鼠移上去可看細節。
-  </p>
+  <div class="section-heading">
+    <div><span class="section-kicker">LIVING ECOSYSTEM</span><h2>生態池觀測</h2></div>
+  </div>
+  <section id="gameHeader" hidden aria-live="polite"></section>
+  <canvas id="graph" width="640" height="320" role="img" aria-label="動態生態池：動物會尋找食物並躲避掠食者，植物隨風擺動"></canvas>
+  <section id="speciesSummary" class="species-summary" aria-live="polite" aria-label="圖例">
+    <h3 class="panel-title">圖例</h3>
+  </section>
 
   <details id="chartPanel">
     <summary>📈 數量變化圖（點擊展開／收合）</summary>
@@ -46,14 +99,14 @@
     <p class="chart-note">縱軸預設是「相對平常的倍數」（以觀察期的平均為 ×1，對數座標），所以數量差很多的物種也能放在同一張圖上比較；可切換成較窄的範圍（×0.25～×4，小變化比較明顯）或原始數量。虛線橫段是每個階段（觀察期、各回合）的平均數量，可看出選牌前後的位移，可用「每回合平均線」按鈕開關。藍色圓圈是你的選擇，紅色 ✕ 是滅絕。時間尺度用按鈕切換（不會隨資料變多而壓縮）；在圖上<b>滾動滾輪</b>可以往前（過去）／往後（未來）看，捲到最右邊會自動跟隨最新。滑鼠移到圖上可以看那一刻各物種的數字，點上方的物種名稱可以顯示／隱藏。</p>
   </details>
 
-  <section id="gamePanel" hidden></section>
-
   <section id="controls">
-    <div id="godPanel"></div>
-    <div class="row">
+    <div id="godPanel"><h3 class="panel-title">調整數量</h3></div>
+    <section id="gamePanel" hidden></section>
+    <div id="runControls" class="row">
       <button id="pauseBtn">暫停</button>
       <span id="speedBtns" class="row"></span>
       <button id="restartBtn">重新開始</button>
+      <button id="menuBtn">主選單</button>
       <button id="gameBtn">三選一遊戲</button>
       <button id="endlessBtn">無盡模式</button>
       <span id="seedBox" class="row" title="同一個種子碼會得到同樣的抽牌與隨機結果；輸入別人的種子碼就能玩到同一局">
@@ -64,6 +117,7 @@
       </span>
     </div>
   </section>
+  </main>
 
   <script type="module" src="src/ui/main.js"></script>
 </body>
