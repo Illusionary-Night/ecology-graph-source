@@ -1,91 +1,422 @@
-/* 畫面樣式：只負責外觀，不含任何模擬邏輯 */
-body { font-family: system-ui, "Noto Sans TC", sans-serif; background: #f4f1ea; color: #222; margin: 0; padding: 16px; max-width: 680px; margin-inline: auto; }
-#topbar { display: flex; gap: 24px; align-items: center; font-size: 18px; margin-bottom: 8px; }
-#status { padding: 2px 10px; border-radius: 12px; font-size: 14px; }
-#status.playing { background: #dfe9d3; }
-#status.won { background: #2f8f4e; color: #fff; }
-#status.lost { background: #c0392b; color: #fff; }
-#graph { width: 100%; background: #fff; border-radius: 8px; border: 1px solid #ddd; }
-#controls { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
-.god-row { display: flex; align-items: center; gap: 6px; }
-.god-row .name { width: 2.5em; font-weight: bold; }
-.god-row input { width: 7em; font: inherit; padding: 6px; text-align: center; border: 1px solid #999; border-radius: 6px; }
-.god-row button { padding: 6px 10px; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; }
-button { font: inherit; padding: 8px 16px; border: 1px solid #999; border-radius: 6px; background: #fff; cursor: pointer; }
-button:hover:not(:disabled) { background: #eee; }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
-button.active { background: #333; color: #fff; }
-.node-count { font-size: 15px; font-weight: bold; fill: #fff; text-anchor: middle; dominant-baseline: central; }
-.node-label { font-size: 14px; text-anchor: middle; fill: #333; }
-.bar-text { font-size: 11px; text-anchor: middle; fill: #555; }
-/* 文字加白色描邊，被箭頭線或年齡環穿過時仍然讀得清楚 */
-.node-label, .bar-text { paint-order: stroke; stroke: #fff; stroke-width: 3.5px; stroke-linejoin: round; }
+/* 生態圖論介面：清楚的資訊層級、柔和的自然色系與響應式操作區。 */
+:root {
+  color-scheme: light;
+  --ink: #20352c;
+  --muted: #718078;
+  --line: #dce6dc;
+  --paper: #ffffff;
+  --canvas: #f1f5ef;
+  --forest: #245c43;
+  --leaf: #43805c;
+  --mint: #e7f1e8;
+  --gold: #d69b3d;
+  --shadow: 0 10px 30px rgb(32 53 44 / 6%);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Noto Sans TC", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
 
-/* 食物鏈能量流動：虛線沿線移動（dashoffset 增加 = 往線的起點，也就是捕食者端移動） */
-.energy-line { fill: none; stroke-dasharray: 2 12; stroke-linecap: round; animation: energy-flow 2s linear infinite; }
-@keyframes energy-flow { to { stroke-dashoffset: 14; } }
-#legend { font-size: 12px; color: #666; line-height: 1.6; margin: 8px 2px 0; }
+* { box-sizing: border-box; }
+body.selection-overlay-open { position: fixed; inset: 0; width: 100%; overflow: hidden; overscroll-behavior: none; }
+body {
+  margin: 0;
+  padding: 32px 24px 56px;
+  color: var(--ink);
+  background: radial-gradient(ellipse at 12% 0%, #e3eee2 0, transparent 34rem), var(--canvas);
+}
+button, input { font: inherit; }
+button {
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: transform .16s ease, border-color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+button:hover:not(:disabled) { border-color: #9db9a2; background: #f7faf6; transform: translateY(-1px); }
+button:active:not(:disabled) { transform: translateY(0); }
+button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid #86b697; outline-offset: 2px; }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.active { border-color: var(--forest); color: #fff; background: var(--forest); box-shadow: 0 3px 10px rgb(36 92 67 / 18%); }
 
-/* 季節指示：進度條 = 目前季節因子在 [1−A, 1+A] 中的位置 */
-#seasonWrap { font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }
-#seasonBar { display: inline-block; width: 64px; height: 10px; background: #d9d9d9; border-radius: 5px; overflow: hidden; }
-#seasonFill { display: block; height: 100%; width: 50%; background: #6bbf59; }
+#gameContent {
+  display: grid;
+  width: 100%;
+  max-width: 1440px;
+  grid-template-columns: minmax(0, 1.9fr) minmax(340px, .9fr);
+  grid-template-areas:
+    "topbar topbar"
+    "tutorial tutorial"
+    "heading heading"
+    "gameHeader gameHeader"
+    "graph controls"
+    "summary summary"
+    "chart chart";
+  align-items: start;
+  gap: 12px 22px;
+  margin: 0 auto;
+}
+#gameContent[hidden] { display: none; }
+#topbar { grid-area: topbar; }
+#tutorialPanel { grid-area: tutorial; width: 100%; }
+.section-heading { grid-area: heading; width: 100%; }
+#gameHeader { display: flex; grid-area: gameHeader; width: 100%; flex-direction: column; gap: 10px; margin: 0; padding: 15px 20px; border: 1px solid #cfddce; border-radius: 15px; background: linear-gradient(110deg, #f8fbf6, #edf4ea); box-shadow: var(--shadow); }
+#gameHeader[hidden] { display: none; }
+.game-header-line { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.game-header-actions { display: flex; align-items: center; gap: 12px; }
+.game-header-actions .record { flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 0; }
+.game-seed { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #dce7d9; border-radius: 9px; background: #fff; }
+.game-seed-label { color: #718078; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.game-header-controls { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 11px; border-top: 1px solid #dce7d9; }
+.game-seed-value { color: #244a36; font: 800 15px ui-monospace, Consolas, monospace; letter-spacing: 2px; }
+.game-round-count { color: #53675a; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.game-round-steps { display: flex; align-items: center; gap: 5px; }
+.game-round-index { display: inline-flex; width: 29px; height: 29px; align-items: center; justify-content: center; border: 1px solid #d5e1d3; border-radius: 50%; color: #829087; background: #fff; font-size: 11px; transition: color .16s ease, background .16s ease, border-color .16s ease; }
+.game-round-index.complete { border-color: #c8ddc8; color: #3f7250; background: #e9f3e7; }
+.game-round-index.current { border-color: var(--forest); color: #fff; background: var(--forest); box-shadow: 0 0 0 3px rgb(36 92 67 / 12%); }
+.game-header-controls #runControls { display: flex; flex-wrap: nowrap; align-items: center; justify-content: flex-end; gap: 4px; }
+.game-header-controls #speedBtns { flex-wrap: nowrap; }
+.game-header-controls #runControls button { min-height: 35px; padding: 6px 10px; }
+.game-header-controls #speedBtns button { min-height: 32px; padding: 5px 8px; font-size: 11px; }
+.game-pending { margin: 0 0 8px; color: #718078; font-size: 11px; font-weight: 700; }
+.game-running-panel { display: flex; min-height: 380px; flex-direction: column; }
+.game-running-panel .game-pending { flex: 0 0 auto; }
+.card-shuffle { position: relative; display: flex; min-height: 250px; flex: 1 1 auto; align-items: center; justify-content: center; overflow: hidden; margin: 0 0 16px; perspective: 700px; }
+.shuffle-card { position: absolute; display: grid; width: 92px; height: 130px; place-items: center; border: 1px solid #b8cdb6; border-radius: 14px; color: #77967a; background: repeating-linear-gradient(135deg, #f5f9f2 0 9px, #e8f0e5 9px 18px); box-shadow: 0 8px 20px rgb(39 70 48 / 18%); }
+.shuffle-card::after { position: absolute; inset: 5px; border: 1px solid #c5d7c2; border-radius: 6px; content: ''; }
+.shuffle-card-mark { font-size: 34px; }
+.shuffle-card-1 { animation: shuffle-left 1.05s ease-in-out infinite; }
+.shuffle-card-2 { animation: shuffle-center 1.05s ease-in-out infinite; }
+.shuffle-card-3 { animation: shuffle-right 1.05s ease-in-out infinite; }
+@keyframes shuffle-left { 0%, 100% { transform: translate(-58px, 8px) rotate(-16deg); } 50% { transform: translate(58px, -12px) rotate(12deg); } }
+@keyframes shuffle-center { 0%, 100% { transform: translate(0, -12px) rotate(0); } 50% { transform: translate(-10px, 15px) rotate(-5deg); } }
+@keyframes shuffle-right { 0%, 100% { transform: translate(58px, 8px) rotate(16deg); } 50% { transform: translate(-58px, -12px) rotate(-12deg); } }
+@media (prefers-reduced-motion: reduce) { .shuffle-card { animation: none; } .shuffle-card-1 { transform: translate(-58px, 8px) rotate(-16deg); } .shuffle-card-3 { transform: translate(58px, 8px) rotate(16deg); } }
+.game-progress { height: 6px; flex: 0 0 6px; overflow: hidden; margin-top: auto; border-radius: 99px; background: #e5ece2; }
+.game-progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #78a87d, #d6b35f); transition: width .12s linear; }
+#graph { grid-area: graph; align-self: stretch; width: 100%; }
+#speciesSummary { grid-area: summary; margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--paper); box-shadow: var(--shadow); }
+#controls { grid-area: controls; width: 100%; margin-top: 0; align-self: stretch; }
+#gamePanel { width: 100%; }
+#controls > #gamePanel { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+#gamePanel.card-selection-overlay { position: fixed; z-index: 1000; inset: 0; display: grid; width: 100%; height: 100vh; height: 100dvh; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; justify-items: center; gap: clamp(12px, 2vh, 22px); overflow-y: auto; padding: clamp(18px, 4vh, 42px); background: rgb(12 23 17 / 72%); backdrop-filter: blur(5px); }
+#gamePanel.card-selection-overlay[hidden] { display: none; }
+#controls > #gamePanel.card-selection-overlay .offers { display: grid; width: min(1240px, 100%); grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: clamp(12px, 2vw, 26px); margin: auto; }
+#controls > #gamePanel.card-selection-overlay .offer { min-height: min(38vh, 360px); gap: 16px; padding: clamp(18px, 3vw, 34px); border-color: #dce8d8; border-radius: 20px; box-shadow: 0 22px 70px rgb(0 0 0 / 28%); }
+#controls > #gamePanel.card-selection-overlay .offer h3 { font-size: clamp(18px, 2vw, 27px); }
+#controls > #gamePanel.card-selection-overlay .offer .desc { font-size: clamp(13px, 1.2vw, 16px); }
+#controls > #gamePanel.card-selection-overlay .offer .effects { font-size: clamp(12px, 1.05vw, 14px); }
+#controls > #gamePanel.card-selection-overlay .offer .pick-btn { min-height: 48px; font-size: 14px; }
+#controls > #gamePanel.card-selection-overlay .offers { position: relative; }
+#controls > #gamePanel.card-selection-overlay .offers::before { position: absolute; z-index: 4; top: 50%; left: 50%; width: 70px; height: 98px; border: 1px solid #b8cdb6; border-radius: 12px; background: repeating-linear-gradient(135deg, #f5f9f2 0 9px, #e8f0e5 9px 18px); box-shadow: 0 8px 20px rgb(0 0 0 / 24%); content: ''; pointer-events: none; transform: translate(-50%, -50%) rotate(-8deg); animation: deal-deck-out .42s .12s ease-out both; }
+#controls > #gamePanel.card-selection-overlay .offer.deal-in { z-index: 1; opacity: 0; animation-duration: .72s; animation-timing-function: cubic-bezier(.18, .8, .25, 1); animation-fill-mode: both; }
+#controls > #gamePanel.card-selection-overlay .offer.deal-card-1 { animation-name: deal-card-left; }
+#controls > #gamePanel.card-selection-overlay .offer.deal-card-2 { animation-name: deal-card-center; animation-delay: .08s; }
+#controls > #gamePanel.card-selection-overlay .offer.deal-card-3 { animation-name: deal-card-right; animation-delay: .16s; }
+@keyframes deal-card-left { 0% { opacity: 0; transform: translateX(34vw) translateY(3vh) scale(.2) rotate(24deg); } 62% { opacity: 1; transform: translateX(-10px) translateY(-8px) scale(1.04) rotate(-3deg); } 100% { opacity: 1; transform: translate(0) scale(1) rotate(0); } }
+@keyframes deal-card-center { 0% { opacity: 0; transform: translateY(34vh) scale(.2) rotate(-8deg); } 62% { opacity: 1; transform: translateY(-8px) scale(1.04) rotate(2deg); } 100% { opacity: 1; transform: translate(0) scale(1) rotate(0); } }
+@keyframes deal-card-right { 0% { opacity: 0; transform: translateX(-34vw) translateY(3vh) scale(.2) rotate(-24deg); } 62% { opacity: 1; transform: translateX(10px) translateY(-8px) scale(1.04) rotate(3deg); } 100% { opacity: 1; transform: translate(0) scale(1) rotate(0); } }
+@keyframes deal-card-top { 0% { opacity: 0; transform: translateY(18vh) scale(.2) rotate(10deg); } 62% { opacity: 1; transform: translateY(-7px) scale(1.03) rotate(-2deg); } 100% { opacity: 1; transform: translate(0) scale(1) rotate(0); } }
+@keyframes deal-card-bottom { 0% { opacity: 0; transform: translateY(-18vh) scale(.2) rotate(-10deg); } 62% { opacity: 1; transform: translateY(-7px) scale(1.03) rotate(2deg); } 100% { opacity: 1; transform: translate(0) scale(1) rotate(0); } }
+@keyframes deal-deck-out { 0%, 35% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(.5) rotate(18deg); } }
+#gamePanel.card-selection-overlay #chartPanel { grid-area: auto; width: min(1240px, 100%); max-width: none; margin: 0; padding: 12px 16px; border: 1px solid #dce7d9; border-radius: 14px; background: #fff; box-shadow: 0 16px 50px rgb(0 0 0 / 22%); }
+#gamePanel.card-selection-overlay #chartPanel > summary { display: none; }
+#gamePanel.card-selection-overlay #chartCaption, #gamePanel.card-selection-overlay .chart-note { display: none; }
+#gamePanel.card-selection-overlay #chartCanvas { height: 210px; }
+#controls > #gamePanel .offers { grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 0; }
+#controls > #gamePanel .offer { min-height: 0; gap: 7px; padding: 12px; border-radius: 12px; }
+#controls > #gamePanel .offer .desc, #controls > #gamePanel .offer .effects { min-height: 0; }
+#controls > #gamePanel .offer .effects { padding: 8px 10px 8px 24px; font-size: 10px; line-height: 1.6; }
+#controls > #gamePanel .offer h3 { font-size: 14px; }
+#controls > #gamePanel .offer .desc { font-size: 11px; line-height: 1.55; }
+#controls > #gamePanel .offer .pick-btn { min-height: 37px; font-size: 11px; }
+@media (min-width: 1000px) {
+  #gameContent.game-mode-active { grid-template-columns: minmax(0, 1.9fr) minmax(340px, .9fr); }
+  #gameContent.game-mode-active #controls > #gamePanel .offers { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  #gameContent.game-mode-active #controls > #gamePanel .offer { padding: 9px; }
+  #gameContent.game-mode-active #controls > #gamePanel.card-selection-overlay .offers { width: min(1240px, 100%); gap: clamp(12px, 2vw, 26px); }
+  #gameContent.game-mode-active #controls > #gamePanel.card-selection-overlay .offer { min-height: min(38vh, 360px); padding: clamp(18px, 3vw, 34px); }
+  #gameContent.game-mode-active #controls > #gamePanel .offer .effects { padding: 7px 8px 7px 20px; }
+  #gameContent.game-mode-active #controls > #gamePanel .offer .pick-btn { padding: 6px 4px; }
+}
+#chartPanel { grid-area: chart; width: 100%; }
+#gameContent > #topbar,
+#gameContent > #graph,
+#gameContent > #chartPanel { max-width: none; margin-right: 0; margin-left: 0; }
+#brandline { display: flex; max-width: 1440px; align-items: center; gap: 12px; margin: 0 auto 21px; }
+.brand-mark { display: grid; width: 43px; height: 43px; flex: 0 0 auto; place-items: center; border-radius: 13px; color: #fff; background: var(--forest); font-family: Georgia, serif; font-size: 24px; font-style: italic; box-shadow: 0 5px 14px rgb(36 92 67 / 20%); }
+.eyebrow, .section-kicker { color: #75867b; font-size: 9px; font-weight: 800; letter-spacing: .16em; }
+.eyebrow span { padding: 0 4px; color: #b4c4b5; }
+#brandline h1 { margin: 2px 0 0; color: var(--ink); font-size: 22px; line-height: 1.2; letter-spacing: -.04em; }
+#brandline p { margin: 3px 0 0; color: #748179; font-size: 11px; }
+.section-heading { display: flex; align-items: end; justify-content: space-between; max-width: 1440px; margin: 22px auto 10px; }
+.section-heading h2 { margin: 3px 0 0; color: var(--ink); font-size: 18px; letter-spacing: -.03em; }
+.section-caption { padding-bottom: 3px; color: #849188; font-size: 11px; }
 
-/* 三選一遊戲 */
-#gamePanel { margin-top: 12px; padding: 12px; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
-.game-head { font-size: 16px; font-weight: bold; margin-bottom: 4px; }
-.game-note { font-size: 12px; color: #666; margin-bottom: 8px; }
-.offers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 640px) { .offers { grid-template-columns: 1fr; } }
-/* 卡片大小固定：三張等寬（minmax(0, 1fr) 不被內容撐開），標題、故事、效果各有固定的最小高度，文字少也不會變短；選按鈕貼在卡片底部 */
-.offer { border: 1px solid #bbb; border-radius: 8px; padding: 12px; background: #fafafa; display: flex; flex-direction: column; gap: 8px; min-height: 360px; box-sizing: border-box; }
-.offer h3 { margin: 0; font-size: 16px; line-height: 1.4; min-height: 1.4em; }
-.offer .desc { font-size: 13px; line-height: 1.65; color: #555; min-height: 6.6em; }
-.offer .effects { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.7; color: #333; text-align: left; min-height: 8.5em; }
-.offer .pick-btn { margin-top: auto; }
-.offer .warn-text { font-size: 12px; color: #c0392b; font-weight: bold; }
-.badge { display: inline-block; align-self: flex-start; padding: 2px 8px; border-radius: 10px; font-size: 12px; color: #fff; }
-.badge.good { background: #2f8f4e; }
-.badge.warn { background: #d99a00; }
-.badge.bad { background: #c0392b; }
+#topbar {
+  position: relative;
+  left: 50%;
+  width: min(calc(100vw - 32px), 1760px);
+  max-width: none;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 10px;
+  min-height: 74px;
+  margin-top: 30px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgb(255 255 255 / 88%);
+  box-shadow: var(--shadow);
+}
+#topbar > span { display: inline-flex; flex: 1 1 0; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding: 0 14px; border-right: 1px solid #edf1ec; color: var(--muted); font-size: 12px; font-weight: 650; white-space: nowrap; }
+#topbar > span:last-child { border: 0; }
+#topbar b { color: var(--ink); font-size: 18px; font-variant-numeric: tabular-nums; }
+#status { padding: 8px 13px !important; border: 0 !important; border-radius: 999px; font-size: 12px !important; }
+#status.playing { color: #34634a; background: #e7f2e7; }
+#status.won { color: #fff; background: #2f8054; }
+#status.lost { color: #fff; background: #b84e42; }
+#seasonWrap { gap: 7px !important; }
+#seasonBar { display: inline-block; width: 72px; height: 7px; overflow: hidden; border-radius: 99px; background: #e5eae3; }
+#seasonFill { display: block; height: 100%; width: 50%; border-radius: inherit; transition: width .2s ease; }
+#seasonText { color: var(--ink); font-size: 11px; }
+
+#chartPanel, #gamePanel, #controls {
+  margin-top: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+#chartPanel summary { display: flex; align-items: center; gap: 9px; color: var(--ink); font-size: 14px; font-weight: 750; cursor: pointer; list-style: none; }
+#chartPanel summary::-webkit-details-marker { display: none; }
+#chartPanel summary::before { content: "+"; display: grid; width: 23px; height: 23px; place-items: center; border-radius: 7px; color: var(--forest); background: var(--mint); font-size: 16px; }
+#chartPanel[open] summary::before { content: "−"; }
+
+#graph { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: #e8f0e5; box-shadow: var(--shadow); }
+#graph { height: 100%; aspect-ratio: auto; }
+.species-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 7px; }
+.species-chip { display: grid; grid-template-columns: 26px minmax(0, 1fr); grid-template-rows: auto auto auto; align-items: center; column-gap: 6px; min-width: 0; min-height: 54px; padding: 7px 8px; border: 1px solid #e1e9df; border-radius: 12px; background: #fff; }
+.species-chip .species-icon { grid-column: 1; grid-row: 1 / 4; }
+.species-chip .species-icon img { display: block; width: 24px; height: 24px; border-radius: 6px; object-fit: cover; }
+.species-chip strong, .species-chip small { grid-column: 2; }
+.species-chip strong { color: #365544; font-size: 11px; }
+.species-chip small { color: #849188; font-size: 9px; line-height: 1.45; }
+.panel-title { grid-column: 1 / -1; margin: 0 0 8px; color: var(--ink); font-size: 14px; font-weight: 800; }
+
+#chartPanel { margin-top: 16px; }
+.chart-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 14px 0 10px; }
+.chart-controls button { min-height: 34px; padding: 6px 10px; font-size: 11px; }
+.chart-controls button.active { color: white; }
+.chart-controls button:disabled { cursor: default; }
+.chart-spans { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
+.chart-legend { display: inline-flex; flex-wrap: wrap; gap: 5px; margin-left: auto; }
+.legend-chip { min-height: 29px; padding: 3px 8px !important; border-width: 1px !important; border-radius: 999px !important; font-size: 10px !important; }
+.legend-chip.off { opacity: .4; text-decoration: line-through; }
+#chartCanvas { display: block; width: 100%; height: 260px; border: 1px solid #edf1eb; border-radius: 11px; background: #fcfdfb; }
+.chart-caption { margin-top: 8px; color: #68786f; font-size: 11px; line-height: 1.7; }
+.chart-note { margin: 9px 0 0; color: #829087; font-size: 11px; line-height: 1.7; }
+
+#gamePanel { margin-top: 16px; padding: 24px; border-color: #cfddce; background: linear-gradient(145deg, #f6faf4, #edf4ea); }
+.game-title-group { display: flex; min-width: 0; align-items: baseline; gap: 13px; }
+.game-kicker { color: #7b8f7f; font-size: 9px; font-weight: 850; letter-spacing: .16em; }
+.game-head { margin: 0; color: #203d2d; font-size: 22px; font-weight: 850; letter-spacing: -.035em; }
+.round-track { display: flex; align-items: center; gap: 7px; }
+.round-step { display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid #d5e1d3; border-radius: 50%; color: #8a988c; background: #fff; font-size: 11px; font-weight: 750; }
+.round-step.complete { border-color: #79a487; color: #fff; background: #79a487; }
+.round-step.current { border-color: var(--forest); color: #fff; background: var(--forest); box-shadow: 0 0 0 4px rgb(36 92 67 / 12%); }
+.game-mode-badge { padding: 8px 12px; border: 1px solid #d2e1cf; border-radius: 999px; color: #356147; background: #e7f1e5; font-size: 11px; font-weight: 750; white-space: nowrap; }
+.game-note { margin: 0 0 10px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.offers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 15px; margin-top: 0; }
+.offer { position: relative; display: flex; min-width: 0; min-height: 365px; flex-direction: column; gap: 10px; padding: 18px; border: 1px solid #dce6d9; border-radius: 16px; background: #fff; box-shadow: 0 5px 16px rgb(32 53 44 / 5%); transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.offer:hover { transform: translateY(-3px); border-color: #a6c0a4; box-shadow: 0 12px 25px rgb(32 53 44 / 10%); }
+.offer:focus-within { border-color: #79a487; box-shadow: 0 0 0 3px rgb(67 128 92 / 14%), 0 8px 20px rgb(32 53 44 / 8%); }
+.offer-index { display: inline-flex; align-self: flex-start; padding: 4px 8px; border-radius: 999px; color: #42674b; background: #eaf2e8; font-size: 10px; font-weight: 850; letter-spacing: .04em; }
+.offer:nth-child(2) .offer-index { color: #7b5a24; background: #f8efd9; }
+.offer:nth-child(3) .offer-index { color: #5a6684; background: #edf0f8; }
+.offer h3 { margin: 0; color: #28563e; font-size: 17px; line-height: 1.45; }
+.offer .desc { min-height: 5.3em; color: #66766c; font-size: 12px; line-height: 1.7; }
+.offer .effects { min-height: 7em; margin: 0; padding: 10px 12px 10px 28px; border: 1px solid #edf2eb; border-radius: 10px; color: #40554a; background: #f4f7f1; font-size: 11px; line-height: 1.8; }
+.offer .pick-btn { width: 100%; min-height: 43px; margin-top: auto; border-color: var(--forest); border-radius: 11px; color: white; background: var(--forest); font-size: 13px; }
+.offer .pick-btn:hover:not(:disabled) { border-color: #174632; background: #174632; box-shadow: 0 5px 12px rgb(36 92 67 / 18%); }
+.offer .warn-text { color: #a74336; font-size: 11px; font-weight: 700; }
+.badge { display: inline-flex; align-self: flex-start; padding: 4px 9px; border-radius: 999px; color: white; font-size: 10px; font-weight: 750; }
+.badge.good { background: #43805c; }
+.badge.warn { background: #bd8730; }
+.badge.bad { background: #b84e42; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.chip { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: #eee; color: #333; }
-.chip.down { background: #fde1dd; }
-.chip.up { background: #dff0d8; }
-.chip.gone { background: #c0392b; color: #fff; }
-.result { padding: 10px; border-radius: 8px; font-weight: bold; margin: 6px 0; }
-.result.won { background: #dff0d8; }
-.result.lost { background: #f8d7d3; }
-.history { font-size: 12px; color: #555; margin-top: 8px; line-height: 1.7; }
-.progress { height: 8px; background: #e3e3e3; border-radius: 4px; overflow: hidden; margin: 4px 0 8px; }
-.progress > i { display: block; height: 100%; width: 0; background: #3498db; }
-.hint-btn { margin-top: 10px; }
+.chip { padding: 3px 7px; border-radius: 999px; color: #516259; background: #edf1ed; font-size: 10px; }
+.chip.down { color: #9a463a; background: #f9e9e5; }
+.chip.up { color: #39724d; background: #e5f2e6; }
+.chip.gone { color: #fff; background: #b84e42; }
+.result { margin: 8px 0; padding: 13px 15px; border-radius: 11px; font-weight: 750; }
+.result.won { color: #2f6947; background: #e7f3e8; }
+.result.lost { color: #9b4439; background: #fae9e6; }
+.history { margin-top: 10px; padding-top: 9px; border-top: 1px solid #edf1ec; color: #738078; font-size: 11px; line-height: 1.8; }
+.progress { height: 7px; overflow: hidden; margin: 7px 0 10px; border-radius: 99px; background: #e8eee7; }
+.progress > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #82ad78, #d2a24c); transition: width .2s ease; }
 
-/* 怎麼玩、紀錄 */
-#help { margin: 8px 0; padding: 8px 12px; background: #fff; border: 1px solid #ddd; border-radius: 8px; font-size: 13px; line-height: 1.7; }
-#help summary { cursor: pointer; font-weight: bold; }
-#help p { margin: 6px 0; }
-.record { margin-top: 10px; }
-.record-text { display: block; width: 100%; box-sizing: border-box; margin-top: 6px; font: 12px/1.5 ui-monospace, Consolas, monospace; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
-.record-text[hidden] { display: none; } /* display:block 會蓋掉 hidden 屬性，這裡補回來 */
+#controls { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+#godPanel { padding-bottom: 12px; border-bottom: 1px solid #edf1ec; }
+.god-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 5px 0; }
+.god-row .name { width: 2.5em; color: var(--ink); font-size: 12px; font-weight: 800; }
+.god-row input { width: 100px; min-height: 38px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: #fbfdfb; text-align: center; font-variant-numeric: tabular-nums; }
+.god-row button { min-height: 36px; padding: 6px 10px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+#controls > .row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+#pauseBtn { color: white; border-color: var(--forest); background: var(--forest); }
+#restartBtn, #gameBtn, #endlessBtn, #seedBox { display: none; }
+#restartBtn { color: #9b5141; }
+#menuBtn { color: #315f43; }
+#gameBtn, #endlessBtn { color: #315f43; }
+#speedBtns { justify-content: center; gap: 4px; }
+#speedBtns button { min-height: 34px; padding: 5px 9px; font-size: 11px; }
+#seedBox { align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 11px; }
+#seedInput { width: 88px; min-height: 36px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: #fbfdfb; font-family: ui-monospace, Consolas, monospace; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; }
+#seedInput.bad { border-color: #c2493d; box-shadow: 0 0 0 2px rgb(194 73 61 / 15%); }
+#seedRandomBtn { min-height: 36px; padding: 6px 10px; }
+.game-note#seedNote { margin: 0; }
+.record { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; }
+.record-text { display: block; width: 100%; margin-top: 4px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; color: #4c5d53; background: #f8faf7; font: 11px/1.6 ui-monospace, Consolas, monospace; }
+.record-text[hidden] { display: none; }
 
-/* 數量變化圖 */
-#chartPanel { margin-top: 12px; padding: 8px 12px; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
-#chartPanel summary { cursor: pointer; font-weight: bold; }
-.chart-controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; }
-.chart-controls button { padding: 4px 10px; font-size: 13px; }
-.chart-spans { display: inline-flex; gap: 4px; align-items: center; font-size: 13px; }
-.chart-controls button.active { background: #1976d2; color: #fff; border-color: #1976d2; }
-.chart-controls button:disabled { opacity: 0.45; cursor: default; }
-.chart-legend { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; }
-.legend-chip { padding: 2px 8px; font-size: 12px; border-radius: 10px; border: 2px solid; background: #fff; cursor: pointer; }
-.legend-chip.off { opacity: 0.35; text-decoration: line-through; }
-#chartCanvas { width: 100%; height: 260px; display: block; background: #fcfcfc; border-radius: 6px; }
-.chart-caption { font-size: 12px; color: #555; line-height: 1.7; margin-top: 6px; }
-.chart-note { font-size: 12px; color: #777; line-height: 1.6; margin: 6px 0 0; }
+/* 遊戲主選單：與模擬畫面位於同一頁，不以遮罩阻擋下方內容。 */
+.launch-menu { display: block; max-width: 1180px; margin: 0 auto 16px; padding: 0; }
+.launch-menu[hidden] { display: none; }
+.launch-card { display: grid; width: 100%; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.5fr); gap: 20px 30px; padding: 24px 26px; border: 1px solid #d8e4d7; border-radius: 18px; background: linear-gradient(120deg, #f9fcf7, #edf5ec); box-shadow: var(--shadow); }
+.launch-copy { align-self: center; }
+.launch-copy h2 { margin: 6px 0; color: var(--ink); font-size: 26px; letter-spacing: -.04em; }
+.launch-copy p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.launch-modes { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.launch-mode { display: grid; width: 100%; min-height: 67px; grid-template-columns: 34px minmax(0, 1fr) 22px; grid-template-rows: 1fr; align-items: center; gap: 10px; padding: 10px 13px; border: 1px solid #e1e9e0; border-radius: 12px; text-align: left; background: #fff; }
+.launch-mode:hover:not(:disabled) { border-color: #96b99b; background: #f4f8f2; }
+.launch-mode.featured { border-color: #9dbba0; background: #eef5ed; }
+.launch-mode.selected { border-color: var(--forest); box-shadow: inset 0 0 0 1px var(--forest), 0 4px 12px rgb(36 92 67 / 10%); }
+.mode-number { grid-column: 1; color: #93a397; font-family: ui-monospace, monospace; font-size: 10px; font-weight: 800; }
+.launch-mode strong, .launch-mode small { display: block; }
+.launch-mode strong { color: #254d38; font-size: 14px; }
+.launch-mode small { margin-top: 3px; color: #758279; font-size: 11px; font-weight: 450; line-height: 1.5; }
+.launch-mode > span:nth-child(2) { grid-column: 2; }
+.mode-arrow { grid-column: 3; grid-row: 1; color: #70947a; font-size: 14px; }
+.launch-seed { display: grid; grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-top: 13px; border-top: 1px solid #dfe9dd; }
+.launch-seed label { color: #4c5e52; font-size: 11px; font-weight: 800; }
+.seed-entry { display: flex; gap: 8px; }
+#launchSeedInput { width: 130px; min-height: 42px; padding: 8px 12px; border: 1px solid #d7e2d6; border-radius: 10px; color: #244a36; background: #fff; font-family: ui-monospace, Consolas, monospace; font-size: 16px; font-weight: 750; letter-spacing: 3px; text-align: center; text-transform: uppercase; }
+#launchSeedInput.bad { border-color: #c2493d; box-shadow: 0 0 0 2px rgb(194 73 61 / 15%); }
+#launchSeedRandom { min-height: 42px; color: #315f43; }
+#launchSeedNote { color: #88948b; font-size: 10px; }
 
-/* 種子碼輸入 */
-#seedBox { align-items: center; gap: 6px; }
-#seedInput { font-family: ui-monospace, Consolas, monospace; font-size: 15px; letter-spacing: 2px; text-transform: uppercase; padding: 3px 6px; }
-#seedInput.bad { outline: 2px solid #d93025; }
+/* 新手教學：小型視覺示範 + 指向實際介面的聚焦框。 */
+#tutorialPanel { position: sticky; top: 8px; z-index: 8; display: grid; grid-template-columns: 1fr; gap: 11px; margin: 0 auto 16px; padding: 13px 15px; border: 1px solid #cbdcc9; border-radius: 14px; background: rgb(250 253 248 / 97%); box-shadow: 0 9px 28px rgb(32 53 44 / 14%); }
+#tutorialPanel[hidden] { display: none; }
+.tutorial-progress { height: 4px; overflow: hidden; border-radius: 99px; background: #e2ebe0; }
+.tutorial-progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: #559069; transition: width .2s ease; }
+.tutorial-layout { display: flex; align-items: center; gap: 14px; }
+.tutorial-visual { display: flex; width: 106px; min-width: 106px; min-height: 62px; align-items: center; justify-content: center; gap: 5px; padding: 7px; border-radius: 11px; color: #41644c; background: #eaf2e8; }
+.tutorial-visual img { width: 25px; height: 25px; border-radius: 6px; object-fit: cover; }
+.tutorial-visual .visual-arrow { color: #829885; font-size: 15px; font-weight: 800; }
+.tutorial-visual .visual-label { color: #61776a; font-size: 9px; font-weight: 750; text-align: center; }
+.tutorial-visual .visual-meter { width: 68px; height: 9px; overflow: hidden; border-radius: 9px; background: #d7e3d6; }
+.tutorial-visual .visual-meter i { display: block; width: 68%; height: 100%; border-radius: inherit; background: #6c9a73; }
+.tutorial-visual .visual-pills { display: flex; flex-direction: column; gap: 3px; }
+.tutorial-visual .visual-pills i { padding: 2px 7px; border-radius: 6px; color: #496653; background: #fff; font-size: 8px; font-style: normal; font-weight: 750; }
+.tutorial-visual svg { width: 82px; height: 42px; overflow: visible; }
+.tutorial-visual svg path { fill: none; stroke: #558260; stroke-width: 3; stroke-linecap: round; }
+.tutorial-visual[data-visual="scene"] img { width: 18px; height: 18px; }
+.tutorial-visual[data-visual="scale"] { flex-direction: column; align-items: stretch; gap: 2px; }
+.tutorial-visual[data-visual="scale"] > div { display: flex; align-items: center; justify-content: space-between; gap: 3px; }
+.tutorial-visual[data-visual="scale"] img { width: 18px; height: 18px; }
+.tutorial-visual[data-visual="scale"] .visual-label { font-size: 8px; }
+.tutorial-visual[data-visual="energy"] { flex-direction: column; gap: 3px; }
+.tutorial-visual[data-visual="energy"] .visual-meter { width: 78px; }
+.tutorial-content h2 { margin: 4px 0; color: #254d38; font-size: 17px; }
+.tutorial-content p { margin: 0; color: #63746a; font-size: 12px; line-height: 1.7; }
+.tutorial-content .tutorial-hint { margin-top: 4px; color: #3c7952; font-size: 11px; font-weight: 750; }
+.tutorial-actions { display: flex; align-items: center; gap: 8px; }
+.tutorial-actions button { min-height: 35px; padding: 6px 10px; font-size: 11px; }
+.tutorial-nav { display: inline-flex; gap: 6px; }
+.tutorial-next { color: white; border-color: var(--forest); background: var(--forest); }
+.tutorial-focus { position: relative !important; z-index: 7 !important; outline: 3px solid #d4a342 !important; outline-offset: 4px !important; box-shadow: 0 0 0 8px rgb(212 163 66 / 19%), 0 8px 24px rgb(32 53 44 / 13%) !important; animation: tutorial-glow 1.8s ease-in-out infinite; }
+@keyframes tutorial-glow { 50% { outline-color: #f0c66f; box-shadow: 0 0 0 11px rgb(212 163 66 / 12%), 0 8px 24px rgb(32 53 44 / 13%); } }
+
+@media (max-width: 760px) {
+  body { padding: 24px 16px 40px; }
+  #brandline, .section-heading { max-width: none; }
+  #gameContent {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "topbar"
+      "tutorial"
+      "heading"
+      "gameHeader"
+      "graph"
+      "controls"
+      "summary"
+      "chart";
+    gap: 0;
+  }
+  #graph { height: auto; aspect-ratio: 2 / 1; }
+  #speciesSummary { padding: 12px; }
+  #topbar { left: auto; width: 100%; max-width: none; transform: none; justify-content: center; flex-wrap: wrap; margin-top: 29px; padding: 10px; }
+  #topbar > span { padding: 0 9px; }
+  #topbar > span:first-child { margin-left: 0; }
+  .offers { grid-template-columns: 1fr; }
+  #controls > #gamePanel.card-selection-overlay .offers { width: min(560px, 100%); grid-template-columns: minmax(0, 1fr); }
+  #controls > #gamePanel.card-selection-overlay .offer { min-height: 0; }
+  #controls > #gamePanel.card-selection-overlay .offers::before { display: none; }
+  #controls > #gamePanel.card-selection-overlay .offer.deal-card-1 { animation-name: deal-card-top; }
+  #controls > #gamePanel.card-selection-overlay .offer.deal-card-2 { animation-name: deal-card-center; }
+  #controls > #gamePanel.card-selection-overlay .offer.deal-card-3 { animation-name: deal-card-bottom; }
+  .offer { min-height: 0; }
+  .offer .desc, .offer .effects { min-height: 0; }
+  .chart-legend { margin-left: 0; }
+  #seedBox { margin-left: 0; }
+  .launch-card { grid-template-columns: 1fr; gap: 16px; }
+  .launch-modes { grid-template-columns: 1fr; }
+  .game-header-line { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .game-header-actions { width: 100%; flex-wrap: wrap; }
+  .game-header-actions .record { flex-wrap: wrap; }
+  .game-header-controls { align-items: flex-start; flex-direction: column; }
+  .game-header-controls #runControls, .game-header-controls #speedBtns { flex-wrap: wrap; }
+  .round-track { gap: 5px; }
+  .round-step { width: 26px; height: 26px; }
+}
+@media (max-width: 480px) {
+  body { padding: 19px 10px 28px; }
+  #brandline { margin-bottom: 15px; }
+  .section-heading { align-items: start; flex-direction: column; gap: 3px; }
+  #topbar { gap: 2px; margin-top: 26px; }
+  #topbar > span { min-height: 34px; padding: 0 7px; font-size: 10px; }
+  #topbar b { font-size: 15px; }
+  #status { padding: 6px 9px !important; font-size: 10px !important; }
+  #chartPanel, #gamePanel, #controls { padding: 14px 12px; border-radius: 13px; }
+  #graph { border-radius: 12px; }
+  #controls > .row { align-items: stretch; }
+  #pauseBtn, #restartBtn, #gameBtn, #endlessBtn { flex: 1 1 calc(50% - 8px); }
+  #speedBtns { width: 100%; }
+  #speedBtns button { flex: 1; padding-inline: 4px; }
+  #seedBox { width: 100%; }
+  .launch-card { padding: 19px 14px; border-radius: 15px; }
+  .launch-copy h2 { font-size: 22px; }
+  .launch-mode { min-height: 70px; grid-template-columns: 26px 1fr 18px; gap: 8px; padding: 10px; }
+  .launch-seed { grid-template-columns: 1fr; gap: 7px; }
+  #tutorialPanel { top: 4px; }
+  .tutorial-layout { align-items: flex-start; gap: 10px; }
+  .tutorial-visual { width: 70px; min-width: 70px; min-height: 52px; flex-wrap: wrap; gap: 3px; }
+  .tutorial-visual img { width: 19px; height: 19px; }
+  .tutorial-visual[data-visual="energy"] .visual-meter { width: 52px; }
+  .tutorial-content h2 { font-size: 15px; }
+  .tutorial-content p { font-size: 11px; }
+  .tutorial-actions { justify-content: space-between; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

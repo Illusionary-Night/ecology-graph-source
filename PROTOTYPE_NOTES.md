@@ -1,14 +1,15 @@
-# Prototype 備註
+# Prototype 備註與調參歷史
 
-本檔記錄 prototype 階段「SPEC 沒定或有缺口、我先自行決定」的事項。**SPEC.md 完全沒有修改。**
-正式調整時，請逐項決定是否寫回 SPEC。
+本檔保留原型階段的決策、試驗結果與數值調整軌跡。表格中的描述是當時的狀態快照，可能已被後續改動取代；目前規則請以 `SPEC.md` 和 `src/engine/params.js` 為準。不要直接把本檔較早的 UI、模式或數值描述當成現況。
+
+目前產品包含新手教學、一般沙盒模擬、六回合三選一與無盡模式；場景使用 Canvas 圖示動畫，數量變化圖亦使用 Canvas。種子碼、速度控制和局面重現方式見 `README.md`。
 
 ## 執行方式
 - 測試：`node --test`（Node 24 下 `node --test tests/` 會被當成模組路徑而失敗，所以改用不帶路徑的寫法；也可 `npm test`）。
 - 預覽：瀏覽器的 ES module 無法從 `file://` 載入，需起本機伺服器：`npx serve .`（或 `python -m http.server`），再開對應網址。
 - 新增了 `package.json`（只有 `"type": "module"` 與 test 指令，沒有任何套件）。ES modules 在 Node 裡需要它。
 
-## 與 SPEC 的差異或補充（請確認）
+## 原型時期的差異紀錄（歷史資料）
 
 | # | 項目 | prototype 的做法 | 原因 |
 |---|---|---|---|
